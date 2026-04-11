@@ -1062,7 +1062,7 @@ const styles = StyleSheet.create({
     bottom: 85, // Position above nav bar
     left: 0,
     right: 0,
-    height: 380, // Total height of panel content
+    height: 150, // Total height of panel content
     backgroundColor: '#F5F5F5',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
