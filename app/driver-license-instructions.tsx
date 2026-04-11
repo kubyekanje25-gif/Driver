@@ -174,7 +174,7 @@ export default function DriverLicenseInstructionsPage() {
           </View>
         </View>
 
-        {/* Illustration with fixed height to prevent overlap */}
+        {/* Illustration with fixed height to prevent overlap with buttons */}
         <View style={styles.illustrationContainerFixed}>
           <View style={styles.illustrationBoxSmall}>
             <Text style={styles.illustrationTextSmall}>📄</Text>
@@ -229,18 +229,18 @@ const styles = StyleSheet.create({
   },
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 20 },
   title: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginBottom: 32 },
-  instructionsContainer: { marginBottom: 40 },
+  instructionsContainer: { marginBottom: 20 },
   instructionItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20, paddingHorizontal: 8 },
   checkmark: { fontSize: 20, color: '#B19CD9', marginRight: 12, marginTop: 2 },
   instructionText: { flex: 1, fontSize: 16, color: '#fff', lineHeight: 24, flexWrap: 'wrap' },
   illustrationContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  // Fixed height illustration container to prevent overlap
+  // Fixed height illustration container to fit properly above buttons
   illustrationContainerFixed: {
-    height: 160,
+    height: 150,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 20,
+    marginTop: 10,
+    marginBottom: 10,
   },
   illustrationBox: {
     width: 160,
@@ -251,8 +251,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   illustrationBoxSmall: {
-    width: 140,
-    height: 140,
+    width: 130,
+    height: 130,
     backgroundColor: '#B19CD9',
     borderRadius: 16,
     justifyContent: 'center',

@@ -97,16 +97,27 @@ export default function Dashboard() {
   const [toastData, setToastData] = useState({ clientName: '', message: '' });
 
   const sliderX = useRef(new Animated.Value(0)).current;
-  const SLIDE_WIDTH = width - 40;
-  const SLIDE_THRESHOLD = SLIDE_WIDTH * 0.5;
+  // Toggle dimensions - track is full width minus padding, thumb is 48px
+  const TRACK_WIDTH = width - 64; // 16px padding on each side + 16px margin
+  const THUMB_SIZE = 48;
+  const SLIDE_RANGE = TRACK_WIDTH - THUMB_SIZE - 8; // Max translation (account for 4px padding on each side)
+  const SLIDE_THRESHOLD = SLIDE_RANGE * 0.5;
 
   // Panel animation for draggable bottom sheet (panel slides behind nav bar)
-  // Collapsed: only shows scheduled requests card (about 180px visible above nav)
+  // Collapsed: panel slides down so only scheduled card is visible above nav (85px)
   // Expanded: shows all content including toggle
-  const PANEL_MIN_HEIGHT = 80; // Collapsed height - just scheduled card visible
-  const PANEL_MAX_HEIGHT = height * 0.55; // Expanded height
-  const panelY = useRef(new Animated.Value(0)).current; // 0 = collapsed, negative = expanded
-  const savedPanelY = useRef(0);
+  const PANEL_TOTAL_HEIGHT = 380; // Total panel height
+  const NAV_HEIGHT = 85;
+  // When collapsed, panel should hide behind nav, only showing scheduled card (~100px visible)
+  const PANEL_COLLAPSED_OFFSET = PANEL_TOTAL_HEIGHT - NAV_HEIGHT - 100; // How much to push down when collapsed
+  const PANEL_EXPANDED_OFFSET = 0; // When expanded, no offset
+  const panelY = useRef(new Animated.Value(PANEL_COLLAPSED_OFFSET)).current; // Start collapsed
+  const savedPanelY = useRef(PANEL_COLLAPSED_OFFSET);
+  
+  // Dashboard entry animations
+  const panelSlideAnim = useRef(new Animated.Value(300)).current; // Panel slides up from bottom
+  const cardsFadeAnim = useRef(new Animated.Value(0)).current; // Cards fade in
+  const cardsScaleAnim = useRef(new Animated.Value(0.95)).current; // Cards scale up
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -156,7 +167,7 @@ export default function Dashboard() {
       if (data) {
         setIsOnline(data.isOnline === true);
         setIsBusy(data.isBusy === true);
-        sliderX.setValue(data.isOnline ? SLIDE_WIDTH : 0);
+        sliderX.setValue(data.isOnline ? SLIDE_RANGE : 0);
       } else {
         setIsOnline(false);
         setIsBusy(false);
@@ -379,13 +390,11 @@ export default function Dashboard() {
     await startTracking();
 
     Animated.spring(sliderX, {
-      toValue: SLIDE_WIDTH,
+      toValue: SLIDE_RANGE,
       useNativeDriver: true,
       tension: 100,
       friction: 10,
     }).start();
-
-    console.log('[v0] Driver is now online - drivers_online set');
   };
 
   const goOffline = async () => {
@@ -409,8 +418,6 @@ export default function Dashboard() {
       tension: 100,
       friction: 10,
     }).start();
-
-    console.log('[v0] Driver is now offline - drivers_online removed');
   };
 
   useEffect(() => {
@@ -610,10 +617,10 @@ export default function Dashboard() {
   const gesture = Gesture.Pan()
     .enabled(userStatus === 'approved' && registrationCompleted)
     .onStart(() => {
-      savedTranslateX.current = isOnline ? SLIDE_WIDTH : 0;
+      savedTranslateX.current = isOnline ? SLIDE_RANGE : 0;
     })
     .onUpdate((event) => {
-      const newValue = Math.max(0, Math.min(savedTranslateX.current + event.translationX, SLIDE_WIDTH));
+      const newValue = Math.max(0, Math.min(savedTranslateX.current + event.translationX, SLIDE_RANGE));
       sliderX.setValue(newValue);
     })
     .onEnd((event) => {
@@ -628,34 +635,37 @@ export default function Dashboard() {
   // Panel drag gesture for bottom sheet
   const panelGesture = Gesture.Pan()
     .onStart(() => {
-      savedPanelY.current = (panelY as any)._value || 0;
+      savedPanelY.current = (panelY as any)._value || PANEL_COLLAPSED_OFFSET;
     })
     .onUpdate((event) => {
-      const maxUp = -(PANEL_MAX_HEIGHT - PANEL_MIN_HEIGHT);
-      const newValue = Math.max(maxUp, Math.min(0, savedPanelY.current + event.translationY));
+      // Allow dragging from collapsed (positive offset) to expanded (0)
+      const newValue = Math.max(PANEL_EXPANDED_OFFSET, Math.min(PANEL_COLLAPSED_OFFSET, savedPanelY.current + event.translationY));
       panelY.setValue(newValue);
     })
     .onEnd((event) => {
-      const maxUp = -(PANEL_MAX_HEIGHT - PANEL_MIN_HEIGHT);
-      const snapThreshold = maxUp / 2;
+      const snapThreshold = PANEL_COLLAPSED_OFFSET / 2;
       const currentValue = savedPanelY.current + event.translationY;
 
       if (currentValue < snapThreshold) {
-        // Snap to expanded
+        // Snap to expanded (fully visible)
         Animated.spring(panelY, {
-          toValue: maxUp,
+          toValue: PANEL_EXPANDED_OFFSET,
           useNativeDriver: true,
           tension: 80,
           friction: 12,
-        }).start();
+        }).start(() => {
+          savedPanelY.current = PANEL_EXPANDED_OFFSET;
+        });
       } else {
-        // Snap to collapsed
+        // Snap to collapsed (behind nav, only scheduled card visible)
         Animated.spring(panelY, {
-          toValue: 0,
+          toValue: PANEL_COLLAPSED_OFFSET,
           useNativeDriver: true,
           tension: 80,
           friction: 12,
-        }).start();
+        }).start(() => {
+          savedPanelY.current = PANEL_COLLAPSED_OFFSET;
+        });
       }
     });
 
@@ -672,6 +682,37 @@ export default function Dashboard() {
       }
     };
   }, [locationSubscription]);
+
+  // Dashboard entry animations
+  useEffect(() => {
+    if (!isLoading) {
+      // Animate panel sliding up
+      Animated.spring(panelSlideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 50,
+        friction: 10,
+        delay: 100,
+      }).start();
+      
+      // Animate cards fading in and scaling
+      Animated.parallel([
+        Animated.timing(cardsFadeAnim, {
+          toValue: 1,
+          duration: 400,
+          delay: 200,
+          useNativeDriver: true,
+        }),
+        Animated.spring(cardsScaleAnim, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 60,
+          friction: 8,
+          delay: 200,
+        }),
+      ]).start();
+    }
+  }, [isLoading]);
 
   if (isLoading) {
     return (
@@ -758,7 +799,9 @@ export default function Dashboard() {
         style={[
           styles.slidingPanel,
           {
-            transform: [{ translateY: panelY }],
+            transform: [
+              { translateY: Animated.add(panelY, panelSlideAnim) },
+            ],
           },
         ]}
       >
@@ -772,7 +815,7 @@ export default function Dashboard() {
         {/* Panel Content */}
         <View style={styles.panelContent}>
           {/* Scheduled Requests Card - Always visible when collapsed */}
-          <View style={styles.scheduledCard}>
+          <Animated.View style={[styles.scheduledCard, { opacity: cardsFadeAnim, transform: [{ scale: cardsScaleAnim }] }]}>
             <View style={styles.scheduledIconCircle}>
               <Clock color="#666" size={24} />
             </View>
@@ -780,10 +823,10 @@ export default function Dashboard() {
               <Text style={styles.scheduledTitle}>New scheduled requests</Text>
               <Text style={styles.scheduledSubtitle}>Choose a request that suits you</Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Stats Row */}
-          <View style={styles.statsRow}>
+          <Animated.View style={[styles.statsRow, { opacity: cardsFadeAnim, transform: [{ scale: cardsScaleAnim }] }]}>
             <View style={styles.statCard}>
               <View style={styles.statHeader}>
                 <Text style={styles.statLabel}>Today&apos;s{'\n'}earnings</Text>
@@ -804,18 +847,19 @@ export default function Dashboard() {
               </View>
               <Text style={styles.statValue}>{(driverData?.rating || 5.0).toFixed(2)}</Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* TOGGLE - FULL WIDTH inside panel, below stats */}
-          <View
+          <Animated.View
             style={[
               styles.toggleContainer,
+              { opacity: cardsFadeAnim, transform: [{ scale: cardsScaleAnim }] },
               (userStatus !== 'approved' || !registrationCompleted) && styles.disabledSlider,
             ]}
             pointerEvents={(userStatus === 'approved' && registrationCompleted) ? 'auto' : 'none'}
           >
             <View style={[styles.slideTrack, isOnline && styles.slideTrackOnline]}>
-              <Text style={styles.slideInstructionText}>
+              <Text style={[styles.slideInstructionText, isOnline && styles.slideInstructionTextOnline]}>
                 {isOnline ? 'Slide to go offline' : 'Slide to go online'}
               </Text>
               <GestureDetector gesture={gesture}>
@@ -831,7 +875,7 @@ export default function Dashboard() {
                 </Animated.View>
               </GestureDetector>
             </View>
-          </View>
+          </Animated.View>
         </View>
       </Animated.View>
 
@@ -972,12 +1016,15 @@ const styles = StyleSheet.create({
   },
   slideInstructionText: {
     position: 'absolute',
-    left: 60,
+    left: 0,
     right: 0,
     textAlign: 'center',
     color: '#fff',
     fontSize: 17,
     fontWeight: '600',
+  },
+  slideInstructionTextOnline: {
+    // Text stays centered when online
   },
   slideThumb: {
     position: 'absolute',
@@ -1007,12 +1054,12 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 
-  // Sliding panel - positioned BEHIND the bottom nav
-  // When collapsed: only scheduled requests card visible (180px)
-  // When expanded: shows stats + toggle (full height)
+  // Sliding panel - slides behind nav bar when collapsed
+  // When collapsed: only scheduled requests card visible above nav
+  // When expanded: shows all content including toggle
   slidingPanel: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 85, // Position above nav bar
     left: 0,
     right: 0,
     height: 380, // Total height of panel content

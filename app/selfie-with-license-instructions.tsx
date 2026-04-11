@@ -119,17 +119,15 @@ export default function SelfieWithLicenseInstructionsPage() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={styles.headerLarge}>
         <TouchableOpacity onPress={() => router.back()}>
           <ArrowLeft color="#fff" size={28} />
         </TouchableOpacity>
-        <Text style={styles.headerText}>Driver license</Text>
+        <Text style={styles.headerTitleLarge}>Driver License</Text>
         <View style={{ width: 28 }} />
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.title}>Driver license</Text>
-
+      <View style={styles.contentCompact}>
         <View style={styles.instructionsContainer}>
           <View style={styles.instructionItem}>
             <Text style={styles.checkmark}>✓</Text>
@@ -140,7 +138,7 @@ export default function SelfieWithLicenseInstructionsPage() {
           <View style={styles.instructionItem}>
             <Text style={styles.checkmark}>✓</Text>
             <Text style={styles.instructionText}>
-              Please don't use screenshots, copies, or printed photos.
+              Please don&apos;t use screenshots, copies, or printed photos.
             </Text>
           </View>
           <View style={styles.instructionItem}>
@@ -151,14 +149,14 @@ export default function SelfieWithLicenseInstructionsPage() {
           </View>
         </View>
 
-        <View style={styles.illustrationContainer}>
-          <View style={styles.illustrationBox}>
-            <Text style={styles.illustrationText}>🤳</Text>
+        <View style={styles.illustrationContainerFixed}>
+          <View style={styles.illustrationBoxSmall}>
+            <Text style={styles.illustrationTextSmall}>🤳</Text>
           </View>
         </View>
       </View>
 
-      <View style={styles.footer}>
+      <View style={styles.footerFixed}>
         <TouchableOpacity style={styles.primaryButton} onPress={handleTakeSelfie}>
           <Text style={styles.primaryButtonText}>Take a selfie</Text>
         </TouchableOpacity>
@@ -168,21 +166,68 @@ export default function SelfieWithLicenseInstructionsPage() {
 }
 
 const styles = StyleSheet.create({
-  // original styles preserved
   container: { flex: 1, backgroundColor: '#1a1a1a' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 20 },
+  // Large header with bigger title
+  headerLarge: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingBottom: 12,
+  },
+  headerTitleLarge: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingBottom: 16,
+  },
   headerText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  // Compact content to fit illustration properly
+  contentCompact: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 20 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginBottom: 32 },
-  instructionsContainer: { marginBottom: 40 },
-  instructionItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20, paddingHorizontal: 8 },
+  instructionsContainer: { marginBottom: 24 },
+  instructionItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, paddingHorizontal: 8 },
   checkmark: { fontSize: 20, color: '#B19CD9', marginRight: 12, marginTop: 2 },
   instructionText: { flex: 1, fontSize: 16, color: '#fff', lineHeight: 24, flexWrap: 'wrap' },
+  // Fixed height illustration to prevent overlap with button
+  illustrationContainerFixed: {
+    height: 160,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
   illustrationContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   illustrationBox: { width: 160, height: 160, backgroundColor: '#B19CD9', borderRadius: 20,
     justifyContent: 'center', alignItems: 'center' },
+  illustrationBoxSmall: {
+    width: 140,
+    height: 140,
+    backgroundColor: '#B19CD9',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   illustrationText: { fontSize: 80 },
+  illustrationTextSmall: { fontSize: 60 },
+  // Fixed footer at bottom
+  footerFixed: {
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 30,
+    paddingTop: 16,
+  },
   footer: { paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 30 : 20, paddingTop: 8 },
   primaryButton: { backgroundColor: '#B19CD9', borderRadius: 12, padding: 18, alignItems: 'center' },
   primaryButtonText: { fontSize: 18, fontWeight: '600', color: '#000' },
