@@ -1059,7 +1059,7 @@ const styles = StyleSheet.create({
   // When expanded: shows all content including toggle
   slidingPanel: {
     position: 'absolute',
-    bottom: 60, // Position above nav bar
+    bottom: 85, // Position above nav bar
     left: 0,
     right: 0,
     height: 380, // Total height of panel content
