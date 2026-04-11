@@ -113,7 +113,7 @@ export default function Dashboard() {
   const PANEL_EXPANDED_OFFSET = 0; // When expanded, no offset
   const panelY = useRef(new Animated.Value(PANEL_COLLAPSED_OFFSET)).current; // Start collapsed
   const savedPanelY = useRef(PANEL_COLLAPSED_OFFSET);
-  
+
   // Dashboard entry animations
   const panelSlideAnim = useRef(new Animated.Value(300)).current; // Panel slides up from bottom
   const cardsFadeAnim = useRef(new Animated.Value(0)).current; // Cards fade in
@@ -694,7 +694,7 @@ export default function Dashboard() {
         friction: 10,
         delay: 100,
       }).start();
-      
+
       // Animate cards fading in and scaling
       Animated.parallel([
         Animated.timing(cardsFadeAnim, {
@@ -1059,7 +1059,7 @@ const styles = StyleSheet.create({
   // When expanded: shows all content including toggle
   slidingPanel: {
     position: 'absolute',
-    bottom: 85, // Position above nav bar
+    bottom: 60, // Position above nav bar
     left: 0,
     right: 0,
     height: 380, // Total height of panel content
