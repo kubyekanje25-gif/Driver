@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -43,7 +43,7 @@ const watchLocation = async (callback: (coords: { latitude: number; longitude: n
     const Location = await import('expo-location');
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return null;
-    
+
     return await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
@@ -58,7 +58,7 @@ const watchLocation = async (callback: (coords: { latitude: number; longitude: n
     if (!navigator.geolocation) return null;
     const watchId = navigator.geolocation.watchPosition(
       (pos) => callback({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, heading: pos.coords.heading || 0 }),
-      () => {},
+      () => { },
       { enableHighAccuracy: true }
     );
     return { remove: () => navigator.geolocation.clearWatch(watchId) };
@@ -103,7 +103,7 @@ export default function Dashboard() {
   // Panel animation for draggable bottom sheet (panel slides behind nav bar)
   // Collapsed: only shows scheduled requests card (about 180px visible above nav)
   // Expanded: shows all content including toggle
-  const PANEL_MIN_HEIGHT = 180; // Collapsed height - just scheduled card visible
+  const PANEL_MIN_HEIGHT = 80; // Collapsed height - just scheduled card visible
   const PANEL_MAX_HEIGHT = height * 0.55; // Expanded height
   const panelY = useRef(new Animated.Value(0)).current; // 0 = collapsed, negative = expanded
   const savedPanelY = useRef(0);
@@ -123,10 +123,10 @@ export default function Dashboard() {
         // Set verification status from Firestore
         const verificationStatus = data.verificationStatus || 'pending';
         const regCompleted = data.registrationCompleted === true;
-        
+
         setUserStatus(verificationStatus as 'pending' | 'approved' | 'accepted' | 'rejected');
         setRegistrationCompleted(regCompleted);
-        
+
         // Store driver profile data for ride acceptance - include ALL fields
         setDriverData({
           profile: {
@@ -394,7 +394,7 @@ export default function Dashboard() {
 
     setIsOnline(false);
     await stopTracking();
-    
+
     // Update drivers/{uid} status
     await update(ref(database, `drivers/${uid}`), {
       status: 'offline',
@@ -461,7 +461,7 @@ export default function Dashboard() {
       const plateNumber = driverData.vehicle?.plateNumber || '';
       const photo = driverData.profile?.profilePicture || '';
       const rating = driverData.rating || 5.0;
-      
+
       // Truck-specific fields
       const tonnage = driverData.vehicle?.tonnage || '';
       const refrigerationType = driverData.vehicle?.refrigerationType || '';
@@ -639,7 +639,7 @@ export default function Dashboard() {
       const maxUp = -(PANEL_MAX_HEIGHT - PANEL_MIN_HEIGHT);
       const snapThreshold = maxUp / 2;
       const currentValue = savedPanelY.current + event.translationY;
-      
+
       if (currentValue < snapThreshold) {
         // Snap to expanded
         Animated.spring(panelY, {
@@ -867,8 +867,8 @@ export default function Dashboard() {
         <BlurView intensity={90} style={styles.blurOverlay}>
           <View style={styles.overlayCard}>
             <Text style={styles.overlayTitle}>
-              {userStatus === 'rejected' 
-                ? 'Your application was not approved' 
+              {userStatus === 'rejected'
+                ? 'Your application was not approved'
                 : userStatus === 'pending'
                   ? 'Your account is under review'
                   : !registrationCompleted
@@ -894,7 +894,7 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#E8E8E8' },
   loadingContainer: { justifyContent: 'center', alignItems: 'center' },
-  
+
   // Full screen map background
   mapFullScreen: {
     position: 'absolute',
@@ -904,9 +904,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: '#E8E8E8',
   },
-  mapBackground: { 
-    flex: 1, 
-    justifyContent: 'center', 
+  mapBackground: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   mapGrid: {
@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  
+
   // Toggle inside panel - FULL WIDTH
   toggleContainer: {
     marginTop: 16,
@@ -1006,7 +1006,7 @@ const styles = StyleSheet.create({
   disabledSlider: {
     opacity: 0.5,
   },
-  
+
   // Sliding panel - positioned BEHIND the bottom nav
   // When collapsed: only scheduled requests card visible (180px)
   // When expanded: shows stats + toggle (full height)
@@ -1043,7 +1043,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 100, // Extra space for content behind bottom nav
   },
-  
+
   // Scheduled requests card
   scheduledCard: {
     flexDirection: 'row',
@@ -1071,11 +1071,11 @@ const styles = StyleSheet.create({
   scheduledTextContainer: { flex: 1 },
   scheduledTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
   scheduledSubtitle: { fontSize: 13, color: '#888' },
-  
+
   // Stats row
-  statsRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     gap: 10,
   },
   statCard: {
