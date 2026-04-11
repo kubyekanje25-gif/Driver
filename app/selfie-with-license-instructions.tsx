@@ -13,8 +13,6 @@ import { router } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRegistration } from '@/context/RegistrationContext';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
 
 export default function SelfieWithLicenseInstructionsPage() {
   const { registrationData, updateLicense } = useRegistration();
@@ -56,21 +54,11 @@ export default function SelfieWithLicenseInstructionsPage() {
 
   const handleSave = async () => {
     if (capturedImage) {
+      // Only update local registration context - Firestore write happens in license-step.tsx
       updateLicense({
         ...registrationData.license,
         selfieWithLicense: capturedImage,
       });
-
-      const uid = auth.currentUser?.uid || registrationData.uid;
-      if (uid) {
-        try {
-          await update(ref(database, `users/${uid}/license`), {
-            selfieWithLicense: '',
-          });
-        } catch (error) {
-          console.error('Error updating Firebase:', error);
-        }
-      }
 
       router.back();
     }

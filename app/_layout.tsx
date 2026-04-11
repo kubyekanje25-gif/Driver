@@ -17,20 +17,20 @@ function SplashScreen({ onFinish }: { onFinish: () => void }) {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 1000,
+        duration: 1500,
         useNativeDriver: true,
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
-        duration: 2500,
+        duration: 4000,
         useNativeDriver: true,
       }),
     ]).start();
 
+    // Show splash for 8 seconds before transitioning to login
     const timer = setTimeout(() => {
-      console.log('[v0] SplashScreen timer finished, calling onFinish');
       onFinish();
-    }, 3000);
+    }, 8000);
 
     return () => clearTimeout(timer);
   }, []);

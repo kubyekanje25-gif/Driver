@@ -49,10 +49,7 @@ export function createGeoFireObject(latitude: number, longitude: number) {
 
   return {
     g: geohash,
-    l: {
-      0: latitude,
-      1: longitude,
-    },
+    l: [latitude, longitude],
   };
 }
 

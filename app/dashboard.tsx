@@ -101,8 +101,10 @@ export default function Dashboard() {
   const SLIDE_THRESHOLD = SLIDE_WIDTH * 0.5;
 
   // Panel animation for draggable bottom sheet (panel slides behind nav bar)
-  const PANEL_MIN_HEIGHT = 280; // Collapsed height (includes space behind 85px nav)
-  const PANEL_MAX_HEIGHT = height * 0.6; // Expanded height
+  // Collapsed: only shows scheduled requests card (about 180px visible above nav)
+  // Expanded: shows all content including toggle
+  const PANEL_MIN_HEIGHT = 180; // Collapsed height - just scheduled card visible
+  const PANEL_MAX_HEIGHT = height * 0.55; // Expanded height
   const panelY = useRef(new Animated.Value(0)).current; // 0 = collapsed, negative = expanded
   const savedPanelY = useRef(0);
 
@@ -125,7 +127,7 @@ export default function Dashboard() {
         setUserStatus(verificationStatus as 'pending' | 'approved' | 'accepted' | 'rejected');
         setRegistrationCompleted(regCompleted);
         
-        // Store driver profile data for ride acceptance
+        // Store driver profile data for ride acceptance - include ALL fields
         setDriverData({
           profile: {
             firstName: data.firstName || '',
@@ -137,6 +139,9 @@ export default function Dashboard() {
             model: data.vehicleModel || '',
             color: data.vehicleColor || '',
             plateNumber: data.plateNumber || '',
+            // Truck-specific fields
+            tonnage: data.tonnage || '',
+            refrigerationType: data.refrigerationType || '',
           },
           rating: data.rating || 5.0,
         });
@@ -266,7 +271,8 @@ export default function Dashboard() {
 
       setCurrentLocation({ latitude, longitude });
 
-      // Update driver_locations/{uid} with geohash format for GeoFire compatibility
+      // CRITICAL: Update driver_locations/{uid} with geohash format for GeoFire compatibility
+      // This is the ONLY path the client app uses to find nearby drivers
       const geoObject = createGeoFireObject(latitude, longitude);
       await set(ref(database, `driver_locations/${uid}`), geoObject);
 
@@ -284,15 +290,13 @@ export default function Dashboard() {
         lastActive: Date.now(),
       });
 
-      // Update ride location if driver is busy with an active ride
-      if (isBusy && activeRide) {
+      // Update ride location if driver has an active ride (any status during trip)
+      if (activeRide && (rideStatus === 'accepted' || rideStatus === 'arrived' || rideStatus === 'in_progress')) {
         await update(ref(database, `rides/${activeRide.id}/location`), {
           latitude,
           longitude,
         });
       }
-
-      console.log('[v0] Driver location updated with geohash:', latitude, longitude);
     });
     setLocationSubscription(subscription);
   };
@@ -310,14 +314,13 @@ export default function Dashboard() {
       setLocationSubscription(null);
     }
 
-    // Remove driver_locations/{uid} when going offline
+    // ONLY remove driver_locations/{uid} when driver explicitly goes OFFLINE
+    // This is called only from goOffline() - location continues during rides
     await remove(ref(database, `driver_locations/${uid}`));
 
     await update(ref(database, `drivers/${uid}`), {
       status: 'offline',
     });
-
-    console.log('[v0] Driver location tracking stopped, driver_locations removed');
   };
 
   const goOnline = async () => {
@@ -439,7 +442,7 @@ export default function Dashboard() {
   const handleAcceptRide = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid || !pendingRide || !driverData) {
-      console.error('❌ Cannot accept ride: missing uid, pendingRide, or driverData');
+      console.error('[v0] Cannot accept ride: missing uid, pendingRide, or driverData');
       return;
     }
 
@@ -458,18 +461,23 @@ export default function Dashboard() {
       const plateNumber = driverData.vehicle?.plateNumber || '';
       const photo = driverData.profile?.profilePicture || '';
       const rating = driverData.rating || 5.0;
+      
+      // Truck-specific fields
+      const tonnage = driverData.vehicle?.tonnage || '';
+      const refrigerationType = driverData.vehicle?.refrigerationType || '';
 
       const driverLat = currentLocation?.latitude || 0;
       const driverLng = currentLocation?.longitude || 0;
 
-      console.log('📝 Updating rideRequests status to accepted...');
+      // Update rideRequests status
       await update(ref(database, `rideRequests/${pendingRide.id}`), {
         status: 'accepted',
         driverId: uid,
         acceptedAt: Date.now(),
       });
 
-      console.log('📝 Updating rides with driver info...');
+      // CRITICAL: Write FULL driver info into rides/{rideId} in Realtime DB
+      // This is what the client app reads to show driver details
       await update(ref(database, `rides/${pendingRide.id}`), {
         status: 'accepted',
         acceptedAt: Date.now(),
@@ -477,18 +485,23 @@ export default function Dashboard() {
         driverName,
         plateNumber,
         carModel,
+        carColor,
+        vehicleBrand: carBrand,
+        driverImage: photo,
         rating,
-        photo,
+        // Truck-specific fields (if applicable)
+        ...(tonnage && { tonnage }),
+        ...(refrigerationType && { refrigerationType }),
         location: {
           latitude: driverLat,
           longitude: driverLng,
         },
       });
 
-      console.log('🗑️ Removing from drivers/incoming...');
+      // Remove from incoming queue
       await remove(ref(database, `drivers/${uid}/incoming/${pendingRide.id}`));
 
-      console.log('[v0] Updating driver status to busy...');
+      // Update driver status to busy
       await update(ref(database, `drivers/${uid}`), {
         busy: true,
         currentRide: pendingRide.id,
@@ -500,12 +513,10 @@ export default function Dashboard() {
         lastUpdated: Date.now(),
       });
 
-      console.log('[v0] Ride accepted successfully - driver is now busy');
-
       setShowRidePopup(false);
       setPendingRide(null);
     } catch (error) {
-      console.error('❌ Error accepting ride:', error);
+      console.error('[v0] Error accepting ride:', error);
     }
   };
 
@@ -742,34 +753,7 @@ export default function Dashboard() {
         </View>
       </View>
 
-      {/* FLOATING TOGGLE - Behind the panel, FULL WIDTH */}
-      <View
-        style={[
-          styles.toggleContainer,
-          (userStatus !== 'approved' || !registrationCompleted) && styles.disabledSlider,
-        ]}
-        pointerEvents={(userStatus === 'approved' && registrationCompleted) ? 'auto' : 'none'}
-      >
-        <View style={[styles.slideTrack, isOnline && styles.slideTrackOnline]}>
-          <Text style={styles.slideInstructionText}>
-            {isOnline ? 'Slide to go offline' : 'Slide to go online'}
-          </Text>
-          <GestureDetector gesture={gesture}>
-            <Animated.View
-              style={[
-                styles.slideThumb,
-                {
-                  transform: [{ translateX: sliderX }],
-                },
-              ]}
-            >
-              <Text style={styles.chevronText}>{'>>'}</Text>
-            </Animated.View>
-          </GestureDetector>
-        </View>
-      </View>
-
-      {/* DRAGGABLE SLIDING PANEL */}
+      {/* DRAGGABLE SLIDING PANEL - Contains toggle inside */}
       <Animated.View
         style={[
           styles.slidingPanel,
@@ -787,7 +771,7 @@ export default function Dashboard() {
 
         {/* Panel Content */}
         <View style={styles.panelContent}>
-          {/* Scheduled Requests Card */}
+          {/* Scheduled Requests Card - Always visible when collapsed */}
           <View style={styles.scheduledCard}>
             <View style={styles.scheduledIconCircle}>
               <Clock color="#666" size={24} />
@@ -818,7 +802,34 @@ export default function Dashboard() {
               <View style={styles.statHeader}>
                 <Text style={styles.statLabel}>Current{'\n'}rating</Text>
               </View>
-              <Text style={styles.statValue}>5.00</Text>
+              <Text style={styles.statValue}>{(driverData?.rating || 5.0).toFixed(2)}</Text>
+            </View>
+          </View>
+
+          {/* TOGGLE - FULL WIDTH inside panel, below stats */}
+          <View
+            style={[
+              styles.toggleContainer,
+              (userStatus !== 'approved' || !registrationCompleted) && styles.disabledSlider,
+            ]}
+            pointerEvents={(userStatus === 'approved' && registrationCompleted) ? 'auto' : 'none'}
+          >
+            <View style={[styles.slideTrack, isOnline && styles.slideTrackOnline]}>
+              <Text style={styles.slideInstructionText}>
+                {isOnline ? 'Slide to go offline' : 'Slide to go online'}
+              </Text>
+              <GestureDetector gesture={gesture}>
+                <Animated.View
+                  style={[
+                    styles.slideThumb,
+                    {
+                      transform: [{ translateX: sliderX }],
+                    },
+                  ]}
+                >
+                  <Text style={[styles.chevronText, isOnline && styles.chevronTextOnline]}>{isOnline ? '<<' : '>>'}</Text>
+                </Animated.View>
+              </GestureDetector>
             </View>
           </View>
         </View>
@@ -940,13 +951,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   
-  // Floating toggle - FULL WIDTH, positioned above the panel
+  // Toggle inside panel - FULL WIDTH
   toggleContainer: {
-    position: 'absolute',
-    bottom: 300, // Above the panel when collapsed (panel is 280px)
-    left: 16,
-    right: 16,
-    zIndex: 5, // Lower z-index so panel slides over it
+    marginTop: 16,
   },
   slideTrack: {
     height: 56,
@@ -993,21 +1000,26 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  chevronTextOnline: {
+    color: '#E53935',
+  },
   disabledSlider: {
     opacity: 0.5,
   },
   
-  // Sliding panel - positioned BEHIND the bottom nav, IN FRONT of toggle
+  // Sliding panel - positioned BEHIND the bottom nav
+  // When collapsed: only scheduled requests card visible (180px)
+  // When expanded: shows stats + toggle (full height)
   slidingPanel: {
     position: 'absolute',
-    bottom: 0, // Starts from bottom, slides behind nav
+    bottom: 0,
     left: 0,
     right: 0,
-    height: 280, // Min height when collapsed (includes space behind nav)
+    height: 380, // Total height of panel content
     backgroundColor: '#F5F5F5',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    zIndex: 10, // Higher than toggle (5), lower than nav (15)
+    zIndex: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
