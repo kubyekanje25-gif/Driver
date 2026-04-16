@@ -85,6 +85,7 @@ import RideRequestPopup from '@/components/RideRequestPopup';
 import RideManagementPanel from '@/components/RideManagementPanel';
 import ChatPanel from '@/components/ChatPanel';
 import ToastNotification from '@/components/ToastNotification';
+import { createGeoFireObject } from '@/utils/geofire';
 import { getUnreadCount, listenForClientMessages, autoDeleteReadMessages, watchRideStatusForCleanup } from '@/utils/chat';
 
 const { width, height } = Dimensions.get('window');
@@ -294,43 +295,21 @@ export default function Dashboard() {
     console.log('[v0] Starting location tracking for driver:', uid);
 
     const subscription = await watchLocation(async (coords) => {
-      const { latitude, longitude, heading, speed } = coords;
-
-      // Only send location if driver is online
-      if (!isOnline) {
-        console.log('[v0] Driver is offline, skipping location update');
-        return;
-      }
+      const { latitude, longitude } = coords;
 
       setCurrentLocation({ latitude, longitude });
 
-      // CRITICAL: Update driver_locations/{uid} - This is what client app uses to find drivers
-      // Using flat structure: lat, lng, heading, speed, updatedAt
+      // CRITICAL: Update driver_locations/{uid} with GeoFire format
+      // This is ONLY path client app uses to find nearby drivers
+      const geoObject = createGeoFireObject(latitude, longitude);
       await set(ref(database, `driver_locations/${uid}`), {
-        lat: latitude,
-        lng: longitude,
-        heading: heading || 0,
-        speed: speed || 0,
-        updatedAt: Date.now(),
+        l: geoObject.l,
+        g: geoObject.g,
       });
 
-      console.log('[v0] Driver location updated:', { lat: latitude, lng: longitude });
+      console.log('[v0] Driver location updated to driver_locations:', { lat: latitude, lng: longitude, g: geoObject.g });
 
-      // Also update drivers/{uid}/location for backwards compatibility
-      await update(ref(database, `drivers/${uid}/location`), {
-        latitude,
-        longitude,
-        heading: heading || 0,
-        updatedAt: Date.now(),
-      });
-
-      await update(ref(database, `drivers/${uid}`), {
-        lat: latitude,
-        lng: longitude,
-        lastActive: Date.now(),
-      });
-
-      // Update ride location if driver has an active ride (any status during trip)
+      // Update ride location if driver has an active ride
       if (activeRide && (rideStatus === 'accepted' || rideStatus === 'arrived' || rideStatus === 'in_progress')) {
         await update(ref(database, `rides/${activeRide.id}/location`), {
           latitude,
@@ -359,10 +338,6 @@ export default function Dashboard() {
     // Remove driver_locations/{uid} when driver goes OFFLINE
     await remove(ref(database, `driver_locations/${uid}`));
     console.log('[v0] Driver location removed from driver_locations');
-
-    await update(ref(database, `drivers/${uid}`), {
-      status: 'offline',
-    });
   };
 
   const goOnline = async () => {
