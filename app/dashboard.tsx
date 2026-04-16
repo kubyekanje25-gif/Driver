@@ -38,27 +38,42 @@ const getLocation = async () => {
   }
 };
 
-const watchLocation = async (callback: (coords: { latitude: number; longitude: number; heading?: number }) => void) => {
+const watchLocation = async (callback: (coords: { latitude: number; longitude: number; heading: number; speed: number }) => void) => {
   if (Platform.OS !== 'web') {
     const Location = await import('expo-location');
     const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return null;
+    if (status !== 'granted') {
+      console.log('[v0] Location permission denied');
+      return null;
+    }
 
     return await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
-        timeInterval: 5000,
-        distanceInterval: 10,
+        timeInterval: 3000, // Update every 3 seconds
+        distanceInterval: 15, // Or every 15 meters
       },
       (loc) => {
-        callback({ latitude: loc.coords.latitude, longitude: loc.coords.longitude, heading: loc.coords.heading || 0 });
+        callback({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          heading: loc.coords.heading || 0,
+          speed: loc.coords.speed || 0,
+        });
       }
     );
   } else {
     if (!navigator.geolocation) return null;
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => callback({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, heading: pos.coords.heading || 0 }),
-      () => { },
+      (pos) => callback({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        heading: pos.coords.heading || 0,
+        speed: pos.coords.speed || 0,
+      }),
+      (error) => {
+        console.log('[v0] Location error:', error.message);
+      },
       { enableHighAccuracy: true }
     );
     return { remove: () => navigator.geolocation.clearWatch(watchId) };
@@ -70,7 +85,6 @@ import RideRequestPopup from '@/components/RideRequestPopup';
 import RideManagementPanel from '@/components/RideManagementPanel';
 import ChatPanel from '@/components/ChatPanel';
 import ToastNotification from '@/components/ToastNotification';
-import { createGeoFireObject } from '@/utils/geofire';
 import { getUnreadCount, listenForClientMessages, autoDeleteReadMessages, watchRideStatusForCleanup } from '@/utils/chat';
 
 const { width, height } = Dimensions.get('window');
@@ -277,15 +291,30 @@ export default function Dashboard() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    console.log('[v0] Starting location tracking for driver:', uid);
+
     const subscription = await watchLocation(async (coords) => {
-      const { latitude, longitude, heading } = coords;
+      const { latitude, longitude, heading, speed } = coords;
+
+      // Only send location if driver is online
+      if (!isOnline) {
+        console.log('[v0] Driver is offline, skipping location update');
+        return;
+      }
 
       setCurrentLocation({ latitude, longitude });
 
-      // CRITICAL: Update driver_locations/{uid} with geohash format for GeoFire compatibility
-      // This is the ONLY path the client app uses to find nearby drivers
-      const geoObject = createGeoFireObject(latitude, longitude);
-      await set(ref(database, `driver_locations/${uid}`), geoObject);
+      // CRITICAL: Update driver_locations/{uid} - This is what client app uses to find drivers
+      // Using flat structure: lat, lng, heading, speed, updatedAt
+      await set(ref(database, `driver_locations/${uid}`), {
+        lat: latitude,
+        lng: longitude,
+        heading: heading || 0,
+        speed: speed || 0,
+        updatedAt: Date.now(),
+      });
+
+      console.log('[v0] Driver location updated:', { lat: latitude, lng: longitude });
 
       // Also update drivers/{uid}/location for backwards compatibility
       await update(ref(database, `drivers/${uid}/location`), {
@@ -316,6 +345,8 @@ export default function Dashboard() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    console.log('[v0] Stopping location tracking for driver:', uid);
+
     if (locationSubscription) {
       try {
         await locationSubscription.remove();
@@ -325,9 +356,9 @@ export default function Dashboard() {
       setLocationSubscription(null);
     }
 
-    // ONLY remove driver_locations/{uid} when driver explicitly goes OFFLINE
-    // This is called only from goOffline() - location continues during rides
+    // Remove driver_locations/{uid} when driver goes OFFLINE
     await remove(ref(database, `driver_locations/${uid}`));
+    console.log('[v0] Driver location removed from driver_locations');
 
     await update(ref(database, `drivers/${uid}`), {
       status: 'offline',
@@ -374,9 +405,16 @@ export default function Dashboard() {
         },
       });
 
-      // Update driver_locations/{uid} with geohash
-      const geoObject = createGeoFireObject(latitude, longitude);
-      await set(ref(database, `driver_locations/${uid}`), geoObject);
+      // Update driver_locations/{uid} with flat structure
+      await set(ref(database, `driver_locations/${uid}`), {
+        lat: latitude,
+        lng: longitude,
+        heading: heading || 0,
+        speed: 0,
+        updatedAt: Date.now(),
+      });
+
+      console.log('[v0] Driver went online, initial location set:', { lat: latitude, lng: longitude });
     }
 
     // SET drivers_online/{uid} - NEW REALTIME STATE SYSTEM
