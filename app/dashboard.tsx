@@ -12,7 +12,7 @@ import {
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { BlurView } from 'expo-blur';
 import { database, auth, firestore } from '@/config/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc } from 'firebase/firestore';
 
 // Helper functions to handle location across platforms
 const getLocation = async () => {
@@ -190,46 +190,64 @@ export default function Dashboard() {
       }
     });
 
-    // Listen to Realtime DB drivers/{uid} for current ride info
-    const driverRealtimeRef = ref(database, `drivers/${uid}`);
-    let currentRideUnsubscribe: (() => void) | null = null;
+    // Listen to Firestore orders collection for active orders assigned to this driver
+    const ordersRef = collection(firestore, 'orders');
+    const ordersQuery = query(
+      ordersRef,
+      where('driverId', '==', uid),
+      where('status', '!=', 'completed')
+    );
 
-    const driverListener = onValue(driverRealtimeRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        if (data.currentRide) {
-          if (currentRideUnsubscribe) {
-            currentRideUnsubscribe();
-          }
-
-          const currentRideRef = ref(database, `rides/${data.currentRide}`);
-          const rideListener = onValue(currentRideRef, (rideSnapshot) => {
-            const rideData = rideSnapshot.val();
-            if (rideData) {
-              setActiveRide({ id: data.currentRide, ...rideData });
-              setRideStatus(rideData.status);
-            }
-          });
-
-          currentRideUnsubscribe = () => off(currentRideRef, 'value', rideListener);
-        } else {
-          if (currentRideUnsubscribe) {
-            currentRideUnsubscribe();
-            currentRideUnsubscribe = null;
-          }
-          setActiveRide(null);
-          setRideStatus(null);
-        }
+    const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
+      if (snapshot.empty) {
+        setActiveRide(null);
+        setRideStatus(null);
+        setPendingRide(null);
+        setShowRidePopup(false);
+        return;
       }
+
+      // Get the first active order
+      const orderDoc = snapshot.docs[0];
+      const orderData = orderDoc.data();
+      const order = {
+        id: orderDoc.id,
+        workflowType: orderData.workflowType || 'direct_trip',
+        status: orderData.status,
+        driverStatus: orderData.driverStatus,
+        pickup: orderData.pickup || orderData.pickupAddress,
+        pickupAddress: orderData.pickupAddress || orderData.pickup,
+        destination: orderData.destination || orderData.destinationAddress,
+        destinationAddress: orderData.destinationAddress || orderData.destination,
+        fare: orderData.fare || orderData.price,
+        price: orderData.price || orderData.fare,
+        userName: orderData.userName || orderData.clientName,
+        clientName: orderData.clientName || orderData.userName,
+        userId: orderData.userId || orderData.clientId,
+        clientId: orderData.clientId || orderData.userId,
+        ...orderData,
+      };
+
+      setActiveRide(order);
+      setRideStatus(order.status);
+
+      // Show popup for pending direct_trip or driver_assigned store_delivery
+      const needsAction = 
+        (order.workflowType === 'direct_trip' && order.status === 'pending') ||
+        (order.workflowType === 'store_delivery' && order.status === 'driver_assigned');
+      
+      if (needsAction && !showRidePopup) {
+        setPendingRide(order);
+        setShowRidePopup(true);
+      }
+    }, (error) => {
+      console.error('[v0] Error listening to orders:', error);
     });
 
     return () => {
       unsubscribeFirestore();
       off(driversOnlineRef, 'value', onlineListener);
-      off(driverRealtimeRef, 'value', driverListener);
-      if (currentRideUnsubscribe) {
-        currentRideUnsubscribe();
-      }
+      unsubscribeOrders();
     };
   }, []);
 
@@ -309,12 +327,20 @@ export default function Dashboard() {
 
       console.log('[v0] Driver location updated to driver_locations:', { lat: latitude, lng: longitude, g: geoObject.g });
 
-      // Update ride location if driver has an active ride
-      if (activeRide && (rideStatus === 'accepted' || rideStatus === 'arrived' || rideStatus === 'in_progress')) {
-        await update(ref(database, `rides/${activeRide.id}/location`), {
-          latitude,
-          longitude,
-        });
+      // Update order location in Firestore if driver has an active order
+      if (activeRide && (rideStatus === 'accepted' || rideStatus === 'arrived' || rideStatus === 'started' || rideStatus === 'at_store' || rideStatus === 'picked_up')) {
+        try {
+          const orderRef = doc(firestore, 'orders', activeRide.id);
+          await updateDoc(orderRef, {
+            driverLocation: {
+              latitude,
+              longitude,
+              updatedAt: Date.now(),
+            },
+          });
+        } catch (error) {
+          // Silently fail location updates to avoid spamming console
+        }
       }
     });
     setLocationSubscription(subscription);
@@ -409,36 +435,12 @@ export default function Dashboard() {
     }).start();
   };
 
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid || isBusy || !isOnline) return;
-
-    const incomingRef = ref(database, `drivers/${uid}/incoming`);
-    const incomingListener = onValue(incomingRef, (snapshot) => {
-      if (isBusy) return;
-
-      snapshot.forEach((child) => {
-        const rideId = child.key;
-        if (!rideId) return;
-
-        const rideRef = ref(database, `rides/${rideId}`);
-        onValue(rideRef, (rideSnapshot) => {
-          const ride = rideSnapshot.val();
-          if (ride && ride.status === 'waiting') {
-            setPendingRide({ id: rideId, ...ride });
-            setShowRidePopup(true);
-          }
-        });
-      });
-    });
-
-    return () => off(incomingRef, 'value', incomingListener);
-  }, [isBusy, isOnline]);
+  // Orders are now handled via Firestore listener in the main useEffect above
+  // No RTDB incoming listener needed anymore
 
   const handleAcceptRide = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid || !pendingRide || !driverData) {
-      console.error('[v0] Cannot accept ride: missing uid, pendingRide, or driverData');
       return;
     }
 
@@ -457,27 +459,18 @@ export default function Dashboard() {
       const plateNumber = driverData.vehicle?.plateNumber || '';
       const photo = driverData.profile?.profilePicture || '';
       const rating = driverData.rating || 5.0;
-
-      // Truck-specific fields
       const tonnage = driverData.vehicle?.tonnage || '';
       const refrigerationType = driverData.vehicle?.refrigerationType || '';
 
       const driverLat = currentLocation?.latitude || 0;
       const driverLng = currentLocation?.longitude || 0;
 
-      // Update rideRequests status
-      await update(ref(database, `rideRequests/${pendingRide.id}`), {
+      // Update Firestore order with driver info and status
+      const orderRef = doc(firestore, 'orders', pendingRide.id);
+      await updateDoc(orderRef, {
         status: 'accepted',
-        driverId: uid,
+        driverStatus: 'accepted',
         acceptedAt: Date.now(),
-      });
-
-      // CRITICAL: Write FULL driver info into rides/{rideId} in Realtime DB
-      // This is what the client app reads to show driver details
-      await update(ref(database, `rides/${pendingRide.id}`), {
-        status: 'accepted',
-        acceptedAt: Date.now(),
-        driverId: uid,
         driverName,
         plateNumber,
         carModel,
@@ -485,22 +478,18 @@ export default function Dashboard() {
         vehicleBrand: carBrand,
         driverImage: photo,
         rating,
-        // Truck-specific fields (if applicable)
         ...(tonnage && { tonnage }),
         ...(refrigerationType && { refrigerationType }),
-        location: {
+        driverLocation: {
           latitude: driverLat,
           longitude: driverLng,
         },
       });
 
-      // Remove from incoming queue
-      await remove(ref(database, `drivers/${uid}/incoming/${pendingRide.id}`));
-
       // Update drivers_online/{uid} isBusy = true
       await update(ref(database, `drivers_online/${uid}`), {
         isBusy: true,
-        currentRideId: pendingRide.id,
+        currentOrderId: pendingRide.id,
         lastUpdated: Date.now(),
       });
 
@@ -521,11 +510,12 @@ export default function Dashboard() {
     setPendingRide(null);
   };
 
-  // STORE DELIVERY HANDLERS
+  // STORE DELIVERY HANDLERS - All updates go to Firestore
   const handleAtStore = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'at_store',
         atStoreAt: Date.now(),
       });
@@ -537,7 +527,8 @@ export default function Dashboard() {
   const handlePickedUp = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'picked_up',
         pickedUpAt: Date.now(),
       });
@@ -549,7 +540,8 @@ export default function Dashboard() {
   const handleDelivered = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'delivered',
         deliveredAt: Date.now(),
       });
@@ -558,12 +550,14 @@ export default function Dashboard() {
     }
   };
 
-  // DIRECT TRIP HANDLERS
+  // DIRECT TRIP HANDLERS - All updates go to Firestore
   const handleAcceptTrip = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'accepted',
+        driverStatus: 'accepted',
         acceptedAt: Date.now(),
       });
     } catch (error) {
@@ -574,7 +568,8 @@ export default function Dashboard() {
   const handleArrived = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'arrived',
         arrivedAt: Date.now(),
       });
@@ -586,7 +581,8 @@ export default function Dashboard() {
   const handleStartTrip = async () => {
     if (!activeRide) return;
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'started',
         startedAt: Date.now(),
       });
@@ -598,21 +594,22 @@ export default function Dashboard() {
   const handleCompleteTrip = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid || !activeRide) {
-      console.error('��� Cannot complete trip: missing uid or active ride');
       return;
     }
 
     try {
-      await update(ref(database, `rides/${activeRide.id}`), {
+      // Update Firestore order to completed
+      const orderRef = doc(firestore, 'orders', activeRide.id);
+      await updateDoc(orderRef, {
         status: 'completed',
+        driverStatus: 'completed',
         completedAt: Date.now(),
       });
-
-      await remove(ref(database, `rides/${activeRide.id}/messages`));
 
       // Update drivers_online/{uid} isBusy = false
       await update(ref(database, `drivers_online/${uid}`), {
         isBusy: false,
+        currentOrderId: null,
         lastUpdated: Date.now(),
       });
 
