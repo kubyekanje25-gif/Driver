@@ -7,17 +7,22 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { User, MapPin, Navigation, DollarSign } from 'lucide-react-native';
+import { User, MapPin, Navigation, DollarSign, Hash } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
 interface RideRequestPopupProps {
   visible: boolean;
   ride: {
-    userName: string;
-    pickup: string;
-    destination: string;
-    price: number;
+    orderId?: string;
+    userName?: string;
+    pickup?: string;
+    pickupAddress?: string;
+    destination?: string;
+    destinationAddress?: string;
+    price?: number;
+    fare?: number;
+    workflowType?: string;
   } | null;
   onAccept: () => void;
   onReject: () => void;
@@ -33,6 +38,12 @@ export default function RideRequestPopup({
 }: RideRequestPopupProps) {
   if (!ride) return null;
 
+  const pickupAddress = ride.pickupAddress || ride.pickup || 'Unknown';
+  const destinationAddress = ride.destinationAddress || ride.destination || 'Unknown';
+  const price = ride.price || ride.fare || 0;
+  const userName = ride.userName || 'Customer';
+  const orderId = ride.orderId || '';
+
   return (
     <Modal
       visible={visible}
@@ -42,13 +53,20 @@ export default function RideRequestPopup({
     >
       <View style={styles.overlay}>
         <View style={styles.card}>
-          <Text style={styles.title}>New Ride Request</Text>
+          <Text style={styles.title}>New Trip Request</Text>
+
+          {orderId && (
+            <View style={styles.orderIdContainer}>
+              <Hash color="#666" size={14} />
+              <Text style={styles.orderIdText}>{orderId.slice(0, 12)}...</Text>
+            </View>
+          )}
 
           <View style={styles.infoRow}>
             <User color="#333" size={20} />
             <View style={styles.infoContent}>
-              <Text style={styles.label}>Passenger</Text>
-              <Text style={styles.value}>{ride.userName}</Text>
+              <Text style={styles.label}>Customer</Text>
+              <Text style={styles.value}>{userName}</Text>
             </View>
           </View>
 
@@ -56,7 +74,7 @@ export default function RideRequestPopup({
             <MapPin color="#00C853" size={20} />
             <View style={styles.infoContent}>
               <Text style={styles.label}>Pickup</Text>
-              <Text style={styles.value}>{ride.pickup}</Text>
+              <Text style={styles.value} numberOfLines={2}>{pickupAddress}</Text>
             </View>
           </View>
 
@@ -64,31 +82,27 @@ export default function RideRequestPopup({
             <Navigation color="#4285F4" size={20} />
             <View style={styles.infoContent}>
               <Text style={styles.label}>Destination</Text>
-              <Text style={styles.value}>{ride.destination}</Text>
+              <Text style={styles.value} numberOfLines={2}>{destinationAddress}</Text>
             </View>
           </View>
 
           <View style={styles.infoRow}>
             <DollarSign color="#FFB300" size={20} />
             <View style={styles.infoContent}>
-              <Text style={styles.label}>Price</Text>
-              <Text style={styles.priceValue}>£{ride.price}</Text>
+              <Text style={styles.label}>Fare</Text>
+              <Text style={styles.priceValue}>R{price.toFixed(2)}</Text>
             </View>
           </View>
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.rejectButton} onPress={onReject}>
-              <Text style={styles.rejectText}>Reject</Text>
+              <Text style={styles.rejectText}>Decline</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.acceptButton} onPress={onAccept}>
               <Text style={styles.acceptText}>Accept</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -118,7 +132,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#000',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  orderIdContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    gap: 4,
+  },
+  orderIdText: {
+    fontSize: 12,
+    color: '#666',
+    fontFamily: 'monospace',
   },
   infoRow: {
     flexDirection: 'row',
@@ -174,15 +200,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  cancelButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelText: {
-    color: '#888',
-    fontSize: 14,
-    fontWeight: '600',
-  },
 });
-

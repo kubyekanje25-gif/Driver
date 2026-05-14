@@ -12,7 +12,7 @@ import {
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { BlurView } from 'expo-blur';
 import { database, auth, firestore } from '@/config/firebase';
-import { doc, onSnapshot, collection, query, where, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 
 // Helper functions to handle location across platforms
 const getLocation = async () => {
@@ -190,64 +190,62 @@ export default function Dashboard() {
       }
     });
 
-    // Listen to Firestore orders collection for active orders assigned to this driver
-    const ordersRef = collection(firestore, 'orders');
-    const ordersQuery = query(
-      ordersRef,
-      where('driverId', '==', uid),
-      where('status', '!=', 'completed')
-    );
-
-    const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
-      if (snapshot.empty) {
-        setActiveRide(null);
-        setRideStatus(null);
-        setPendingRide(null);
-        setShowRidePopup(false);
+    // NEW: Listen to driver_trip_requests/{driverUid} for incoming trip requests
+    const tripRequestsRef = ref(database, `driver_trip_requests/${uid}`);
+    const tripRequestsListener = onValue(tripRequestsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        // No pending requests - clear popup if showing
+        if (!activeRide) {
+          setPendingRide(null);
+          setShowRidePopup(false);
+        }
         return;
       }
 
-      // Get the first active order
-      const orderDoc = snapshot.docs[0];
-      const orderData = orderDoc.data();
-      const order = {
-        id: orderDoc.id,
-        workflowType: orderData.workflowType || 'direct_trip',
-        status: orderData.status,
-        driverStatus: orderData.driverStatus,
-        pickup: orderData.pickup || orderData.pickupAddress,
-        pickupAddress: orderData.pickupAddress || orderData.pickup,
-        destination: orderData.destination || orderData.destinationAddress,
-        destinationAddress: orderData.destinationAddress || orderData.destination,
-        fare: orderData.fare || orderData.price,
-        price: orderData.price || orderData.fare,
-        userName: orderData.userName || orderData.clientName,
-        clientName: orderData.clientName || orderData.userName,
-        userId: orderData.userId || orderData.clientId,
-        clientId: orderData.clientId || orderData.userId,
-        ...orderData,
-      };
+      // Get all requests and find the latest one
+      const requests = Object.entries(data).map(([orderId, requestData]: [string, any]) => ({
+        orderId,
+        ...requestData,
+      }));
 
-      setActiveRide(order);
-      setRideStatus(order.status);
+      if (requests.length === 0) return;
 
-      // Show popup for pending direct_trip or driver_assigned store_delivery
-      const needsAction = 
-        (order.workflowType === 'direct_trip' && order.status === 'pending') ||
-        (order.workflowType === 'store_delivery' && order.status === 'driver_assigned');
-      
-      if (needsAction && !showRidePopup) {
-        setPendingRide(order);
+      // Get the latest request (most recent by createdAt or last in array)
+      const latestRequest = requests.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+      // Only show popup if status is incoming_request
+      if (latestRequest.status === 'incoming_request') {
+        const requestData = latestRequest.data || {};
+        setPendingRide({
+          id: latestRequest.orderId,
+          orderId: latestRequest.orderId,
+          workflowType: latestRequest.workflowType || 'direct_trip',
+          requestType: latestRequest.requestType,
+          status: latestRequest.status,
+          pickup: requestData.pickupAddress,
+          pickupAddress: requestData.pickupAddress,
+          destination: requestData.destinationAddress,
+          destinationAddress: requestData.destinationAddress,
+          pickupLat: requestData.pickupLat,
+          pickupLng: requestData.pickupLng,
+          dropLat: requestData.dropLat,
+          dropLng: requestData.dropLng,
+          price: requestData.total || requestData.fee,
+          fare: requestData.fee || requestData.total,
+          userName: requestData.userName,
+          userPhone: requestData.userPhone,
+          expiresAt: latestRequest.expiresAt,
+          createdAt: latestRequest.createdAt,
+        });
         setShowRidePopup(true);
       }
-    }, (error) => {
-      console.error('[v0] Error listening to orders:', error);
     });
 
     return () => {
       unsubscribeFirestore();
       off(driversOnlineRef, 'value', onlineListener);
-      unsubscribeOrders();
+      off(tripRequestsRef, 'value', tripRequestsListener);
     };
   }, []);
 
@@ -435,64 +433,40 @@ export default function Dashboard() {
     }).start();
   };
 
-  // Orders are now handled via Firestore listener in the main useEffect above
-  // No RTDB incoming listener needed anymore
+  // Trip requests come from RTDB driver_trip_requests/{uid}
+  // Trip lifecycle updates go to Firestore orders collection
 
   const handleAcceptRide = async () => {
     const uid = auth.currentUser?.uid;
-    if (!uid || !pendingRide || !driverData) {
+    if (!uid || !pendingRide) {
       return;
     }
 
     try {
-      const firstName = driverData.profile?.firstName || '';
-      const lastName = driverData.profile?.lastName || '';
-      const driverName = `${firstName} ${lastName}`.trim() || 'Driver';
-
-      const carBrand = driverData.vehicle?.brand || '';
-      const carModelName = driverData.vehicle?.model || '';
-      const carColor = driverData.vehicle?.color || '';
-      const carModel = carColor && carBrand
-        ? `${carColor} • ${carBrand} ${carModelName}`.trim()
-        : `${carBrand} ${carModelName}`.trim();
-
-      const plateNumber = driverData.vehicle?.plateNumber || '';
-      const photo = driverData.profile?.profilePicture || '';
-      const rating = driverData.rating || 5.0;
-      const tonnage = driverData.vehicle?.tonnage || '';
-      const refrigerationType = driverData.vehicle?.refrigerationType || '';
-
-      const driverLat = currentLocation?.latitude || 0;
-      const driverLng = currentLocation?.longitude || 0;
-
-      // Update Firestore order with driver info and status
-      const orderRef = doc(firestore, 'orders', pendingRide.id);
-      await updateDoc(orderRef, {
-        status: 'accepted',
-        driverStatus: 'accepted',
-        acceptedAt: Date.now(),
-        driverName,
-        plateNumber,
-        carModel,
-        carColor,
-        vehicleBrand: carBrand,
-        driverImage: photo,
-        rating,
-        ...(tonnage && { tonnage }),
-        ...(refrigerationType && { refrigerationType }),
-        driverLocation: {
-          latitude: driverLat,
-          longitude: driverLng,
-        },
+      // Call backend API to accept the request
+      const response = await fetch('/api/acceptDriverRequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: pendingRide.orderId || pendingRide.id,
+          driverId: uid,
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to accept request');
+      }
 
       // Update drivers_online/{uid} isBusy = true
       await update(ref(database, `drivers_online/${uid}`), {
         isBusy: true,
-        currentOrderId: pendingRide.id,
+        currentOrderId: pendingRide.orderId || pendingRide.id,
         lastUpdated: Date.now(),
       });
 
+      // Set as active ride after acceptance
+      setActiveRide(pendingRide);
+      setRideStatus('accepted');
       setShowRidePopup(false);
       setPendingRide(null);
     } catch (error) {
@@ -500,14 +474,35 @@ export default function Dashboard() {
     }
   };
 
-  const handleRejectRide = () => {
+  const handleRejectRide = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !pendingRide) {
+      setShowRidePopup(false);
+      setPendingRide(null);
+      return;
+    }
+
+    try {
+      // Call backend API to decline the request
+      await fetch('/api/declineDriverRequest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: pendingRide.orderId || pendingRide.id,
+          driverId: uid,
+        }),
+      });
+    } catch (error) {
+      console.error('[v0] Error declining ride:', error);
+    }
+
     setShowRidePopup(false);
     setPendingRide(null);
   };
 
   const handleCancelRide = () => {
-    setShowRidePopup(false);
-    setPendingRide(null);
+    // Same as reject - decline the request
+    handleRejectRide();
   };
 
   // STORE DELIVERY HANDLERS - All updates go to Firestore
