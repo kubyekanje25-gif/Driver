@@ -361,35 +361,16 @@ export default function Dashboard() {
 
     const coords = await getLocation();
     if (coords) {
-      const { latitude, longitude, heading } = coords;
+      const { latitude, longitude } = coords;
 
-      // Update drivers/{uid} with full info
-      await update(ref(database, `drivers/${uid}`), {
-        name: driverName,
-        plateNumber,
-        carModel,
-        rating,
-        photo,
-        status: 'online',
-        busy: false,
-        lastActive: Date.now(),
-        location: {
-          latitude,
-          longitude,
-          heading: heading || 0,
-        },
-      });
-
-      // Update driver_locations/{uid} with flat structure
+      // Update driver_locations/{uid} with GeoFire format
+      const geoObject = createGeoFireObject(latitude, longitude);
       await set(ref(database, `driver_locations/${uid}`), {
-        lat: latitude,
-        lng: longitude,
-        heading: heading || 0,
-        speed: 0,
-        updatedAt: Date.now(),
+        l: geoObject.l,
+        g: geoObject.g,
       });
 
-      console.log('[v0] Driver went online, initial location set:', { lat: latitude, lng: longitude });
+      console.log('[v0] Driver went online, location set to driver_locations:', { lat: latitude, lng: longitude, g: geoObject.g });
     }
 
     // SET drivers_online/{uid} - NEW REALTIME STATE SYSTEM
@@ -416,11 +397,6 @@ export default function Dashboard() {
 
     setIsOnline(false);
     await stopTracking();
-
-    // Update drivers/{uid} status
-    await update(ref(database, `drivers/${uid}`), {
-      status: 'offline',
-    });
 
     // REMOVE drivers_online/{uid} - Driver goes offline
     await remove(ref(database, `drivers_online/${uid}`));
@@ -521,15 +497,10 @@ export default function Dashboard() {
       // Remove from incoming queue
       await remove(ref(database, `drivers/${uid}/incoming/${pendingRide.id}`));
 
-      // Update driver status to busy
-      await update(ref(database, `drivers/${uid}`), {
-        busy: true,
-        currentRide: pendingRide.id,
-      });
-
       // Update drivers_online/{uid} isBusy = true
       await update(ref(database, `drivers_online/${uid}`), {
         isBusy: true,
+        currentRideId: pendingRide.id,
         lastUpdated: Date.now(),
       });
 
@@ -550,39 +521,77 @@ export default function Dashboard() {
     setPendingRide(null);
   };
 
-  const handleArrived = async () => {
-    if (!activeRide) {
-      console.error('❌ Cannot mark arrived: no active ride');
-      return;
-    }
-
+  // STORE DELIVERY HANDLERS
+  const handleAtStore = async () => {
+    if (!activeRide) return;
     try {
-      console.log('📝 Updating ride status to arrived...');
+      await update(ref(database, `rides/${activeRide.id}`), {
+        status: 'at_store',
+        atStoreAt: Date.now(),
+      });
+    } catch (error) {
+      console.error('[v0] Error updating to at_store:', error);
+    }
+  };
+
+  const handlePickedUp = async () => {
+    if (!activeRide) return;
+    try {
+      await update(ref(database, `rides/${activeRide.id}`), {
+        status: 'picked_up',
+        pickedUpAt: Date.now(),
+      });
+    } catch (error) {
+      console.error('[v0] Error updating to picked_up:', error);
+    }
+  };
+
+  const handleDelivered = async () => {
+    if (!activeRide) return;
+    try {
+      await update(ref(database, `rides/${activeRide.id}`), {
+        status: 'delivered',
+        deliveredAt: Date.now(),
+      });
+    } catch (error) {
+      console.error('[v0] Error updating to delivered:', error);
+    }
+  };
+
+  // DIRECT TRIP HANDLERS
+  const handleAcceptTrip = async () => {
+    if (!activeRide) return;
+    try {
+      await update(ref(database, `rides/${activeRide.id}`), {
+        status: 'accepted',
+        acceptedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error('[v0] Error accepting trip:', error);
+    }
+  };
+
+  const handleArrived = async () => {
+    if (!activeRide) return;
+    try {
       await update(ref(database, `rides/${activeRide.id}`), {
         status: 'arrived',
         arrivedAt: Date.now(),
       });
-      console.log('✅ Ride status updated to arrived');
     } catch (error) {
-      console.error('❌ Error updating ride to arrived:', error);
+      console.error('[v0] Error updating to arrived:', error);
     }
   };
 
   const handleStartTrip = async () => {
-    if (!activeRide) {
-      console.error('❌ Cannot start trip: no active ride');
-      return;
-    }
-
+    if (!activeRide) return;
     try {
-      console.log('📝 Updating ride status to started...');
       await update(ref(database, `rides/${activeRide.id}`), {
         status: 'started',
         startedAt: Date.now(),
       });
-      console.log('✅ Ride status updated to started');
     } catch (error) {
-      console.error('❌ Error starting trip:', error);
+      console.error('[v0] Error starting trip:', error);
     }
   };
 
@@ -594,20 +603,12 @@ export default function Dashboard() {
     }
 
     try {
-      console.log('📝 Updating ride status to completed...');
       await update(ref(database, `rides/${activeRide.id}`), {
         status: 'completed',
         completedAt: Date.now(),
       });
 
-      console.log('📝 Cleaning up messages...');
       await remove(ref(database, `rides/${activeRide.id}/messages`));
-
-      console.log('[v0] Updating driver status to available...');
-      await update(ref(database, `drivers/${uid}`), {
-        busy: false,
-        currentRide: null,
-      });
 
       // Update drivers_online/{uid} isBusy = false
       await update(ref(database, `drivers_online/${uid}`), {
@@ -615,12 +616,10 @@ export default function Dashboard() {
         lastUpdated: Date.now(),
       });
 
-      console.log('[v0] Trip completed - driver is now available');
-
       setActiveRide(null);
       setRideStatus(null);
     } catch (error) {
-      console.error('❌ Error completing trip:', error);
+      console.error('[v0] Error completing trip:', error);
     }
   };
 
@@ -696,16 +695,15 @@ export default function Dashboard() {
     };
   }, [locationSubscription]);
 
-  // Dashboard entry animations
+  // Dashboard entry animations - panel slides up to reveal toggle
   useEffect(() => {
     if (!isLoading) {
-      // Animate panel sliding up
+      // Animate panel sliding up from bottom
       Animated.spring(panelSlideAnim, {
         toValue: 0,
         useNativeDriver: true,
         tension: 50,
         friction: 10,
-        delay: 100,
       }).start();
 
       // Animate cards fading in and scaling
@@ -721,9 +719,20 @@ export default function Dashboard() {
           useNativeDriver: true,
           tension: 60,
           friction: 8,
-          delay: 200,
         }),
       ]).start();
+
+      // After initial animation, smoothly expand panel to show toggle
+      setTimeout(() => {
+        Animated.spring(panelY, {
+          toValue: PANEL_EXPANDED_OFFSET,
+          useNativeDriver: true,
+          tension: 60,
+          friction: 12,
+        }).start(() => {
+          savedPanelY.current = PANEL_EXPANDED_OFFSET;
+        });
+      }, 600);
     }
   }, [isLoading]);
 
@@ -746,10 +755,15 @@ export default function Dashboard() {
         onCancel={handleCancelRide}
       />
 
-      {/* RIDE MANAGEMENT PANEL */}
+      {/* RIDE MANAGEMENT PANEL - supports workflowType: store_delivery or direct_trip */}
       <RideManagementPanel
         rideStatus={rideStatus}
         rideInfo={activeRide}
+        workflowType={activeRide?.workflowType}
+        onAtStore={handleAtStore}
+        onPickedUp={handlePickedUp}
+        onDelivered={handleDelivered}
+        onAcceptTrip={handleAcceptTrip}
         onArrived={handleArrived}
         onStartTrip={handleStartTrip}
         onCompleteTrip={handleCompleteTrip}

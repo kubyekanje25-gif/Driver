@@ -12,8 +12,13 @@ import { User, MapPin, Navigation, Check } from 'lucide-react-native';
 const { width } = Dimensions.get('window');
 
 interface RideManagementPanelProps {
-  rideStatus: 'accepted' | 'arrived' | 'started' | null;
+  rideStatus: string | null;
   rideInfo: any;
+  workflowType?: 'store_delivery' | 'direct_trip';
+  onAtStore?: () => void;
+  onPickedUp?: () => void;
+  onDelivered?: () => void;
+  onAcceptTrip?: () => void;
   onArrived: () => void;
   onStartTrip: () => void;
   onCompleteTrip: () => void;
@@ -22,29 +27,79 @@ interface RideManagementPanelProps {
 export default function RideManagementPanel({
   rideStatus,
   rideInfo,
+  workflowType,
+  onAtStore,
+  onPickedUp,
+  onDelivered,
+  onAcceptTrip,
   onArrived,
   onStartTrip,
   onCompleteTrip,
 }: RideManagementPanelProps) {
   if (!rideStatus || !rideInfo) return null;
 
+  // Determine workflow type from rideInfo if not provided as prop
+  const actualWorkflowType = workflowType || rideInfo?.workflowType || 'direct_trip';
+
   const getButtonConfig = () => {
+    // STORE DELIVERY FLOW
+    if (actualWorkflowType === 'store_delivery') {
+      switch (rideStatus) {
+        case 'driver_assigned':
+        case 'assigned':
+        case 'accepted':
+          return {
+            label: 'AT STORE',
+            onPress: onAtStore || (() => {}),
+            color: '#4285F4',
+          };
+        case 'at_store':
+          return {
+            label: 'PICKED UP',
+            onPress: onPickedUp || (() => {}),
+            color: '#00C853',
+          };
+        case 'picked_up':
+          return {
+            label: 'DELIVERED',
+            onPress: onDelivered || (() => {}),
+            color: '#FFB300',
+          };
+        case 'delivered':
+          return {
+            label: 'COMPLETE ORDER',
+            onPress: onCompleteTrip,
+            color: '#9C27B0',
+          };
+        default:
+          return null;
+      }
+    }
+
+    // DIRECT TRIP FLOW (ride, package, delivery_truck, towing)
     switch (rideStatus) {
+      case 'pending':
+      case 'assigned':
+        return {
+          label: 'ACCEPT TRIP',
+          onPress: onAcceptTrip || (() => {}),
+          color: '#4285F4',
+        };
       case 'accepted':
         return {
-          label: 'Arrived',
+          label: 'ARRIVED',
           onPress: onArrived,
           color: '#4285F4',
         };
       case 'arrived':
         return {
-          label: 'Start Trip',
+          label: 'START TRIP',
           onPress: onStartTrip,
           color: '#00C853',
         };
       case 'started':
         return {
-          label: 'Complete Trip',
+          label: 'COMPLETE TRIP',
           onPress: onCompleteTrip,
           color: '#FFB300',
         };
@@ -163,4 +218,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
